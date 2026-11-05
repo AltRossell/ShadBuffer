@@ -1,4 +1,7 @@
-shadowplay keeps turning itself off on me because of drm errors so i made this. one click sets up obs to work like instant replay. it sits in the tray and saves your last 2 minutes when you press a hotkey.
+
+<img width="960" height="640" alt="gif" src="https://github.com/user-attachments/assets/e11e6b74-6375-47e0-9591-6004f6eb3539" />
+
+shadowplay keeps turning itself off on me because of drm errors so i made this. one click sets up obs to work like instant replay. it sits in the tray and saves your last X minutes when you press a hotkey.
 
 **install**
 
