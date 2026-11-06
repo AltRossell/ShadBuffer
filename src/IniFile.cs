@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     // edits single keys and leaves every other line of the file alone
     public sealed class IniFile

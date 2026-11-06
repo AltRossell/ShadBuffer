@@ -3,12 +3,12 @@ using System.IO;
 using System.Security;
 using System.Text;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class StartupTask
     {
-        public const string Name = "ShadOBS";
-        public const string TrayName = "ShadOBS Tray";
+        public const string Name = "ShadBuffer";
+        public const string TrayName = "ShadBuffer Tray";
 
         // no trigger, the tray helper runs this at login so it can clear the crash marker first
         public static string BuildXml(string sid, string obsRoot, bool runAsAdmin)
@@ -63,7 +63,7 @@ namespace ShadOBS
 
         public static void Register(string sid, string obsRoot, bool runAsAdmin)
         {
-            string file = Path.Combine(Path.GetTempPath(), "shadobs-task-" + Guid.NewGuid() + ".xml");
+            string file = Path.Combine(Path.GetTempPath(), "shadbuffer-task-" + Guid.NewGuid() + ".xml");
             File.WriteAllText(file, BuildXml(sid, obsRoot, runAsAdmin), Encoding.Unicode);
             try
             {
@@ -93,7 +93,7 @@ namespace ShadOBS
             return $@"<?xml version=""1.0"" encoding=""UTF-16""?>
 <Task version=""1.4"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
   <RegistrationInfo>
-    <Description>Starts the ShadOBS tray helper at login</Description>
+    <Description>Starts the ShadBuffer tray helper at login</Description>
     <URI>\{TrayName}</URI>
   </RegistrationInfo>
   <Triggers>
@@ -141,7 +141,7 @@ namespace ShadOBS
 
         public static bool RegisterTray(string sid, string exe)
         {
-            string file = Path.Combine(Path.GetTempPath(), "shadobs-tray-" + Guid.NewGuid() + ".xml");
+            string file = Path.Combine(Path.GetTempPath(), "shadbuffer-tray-" + Guid.NewGuid() + ".xml");
             File.WriteAllText(file, BuildTrayXml(sid, exe), Encoding.Unicode);
             try
             {
@@ -161,6 +161,11 @@ namespace ShadOBS
         public static bool Start()
         {
             return Shell.Run("schtasks", $"/run /tn \"{Name}\"", 30000, out _) == 0;
+        }
+
+        public static void End()
+        {
+            Shell.Run("schtasks", $"/end /tn \"{Name}\"", 30000, out _);
         }
     }
 }

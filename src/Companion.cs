@@ -8,13 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     // stays in the tray, listens for the overlay hotkey and watches obs
     public sealed class Companion : ApplicationContext
     {
-        private const string MutexName = @"Local\ShadOBS.Companion";
-        private const string QuitEventName = @"Local\ShadOBS.Quit";
+        private const string MutexName = @"Local\ShadBuffer.Companion";
+        private const string QuitEventName = @"Local\ShadBuffer.Quit";
         private const int OverlayHotkeyId = 1;
         private const int TestHotkeyId = 2;
         private const int WmHotkey = 0x0312;
@@ -189,7 +189,7 @@ namespace ShadOBS
                 await Task.Delay(SaveDelayMs);
                 if (!ObsControl.Send(ctx, ObsControl.Save))
                 {
-                    tray.ShowBalloonTip(3000, Context.AppName, "Couldn't save a clip because OBS isn't recording on the ShadOBS profile.", ToolTipIcon.Warning);
+                    tray.ShowBalloonTip(3000, Context.AppName, "Couldn't save a clip because OBS isn't recording on the ShadBuffer profile.", ToolTipIcon.Warning);
                 }
             });
         }

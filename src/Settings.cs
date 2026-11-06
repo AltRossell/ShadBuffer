@@ -1,7 +1,7 @@
 using System.IO;
 using System.Web.Script.Serialization;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public sealed class Settings
     {

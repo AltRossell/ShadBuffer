@@ -3,18 +3,18 @@ local obs = obslua
 local ffi = require("ffi")
 
 ffi.cdef [[
-typedef struct { long left, top, right, bottom; } SHADOBS_RECT;
-typedef struct { unsigned long size; SHADOBS_RECT monitor; SHADOBS_RECT work; unsigned long flags; } SHADOBS_MONITORINFO;
-typedef int (*SHADOBS_ENUM)(void *, intptr_t);
+typedef struct { long left, top, right, bottom; } SHADBUFFER_RECT;
+typedef struct { unsigned long size; SHADBUFFER_RECT monitor; SHADBUFFER_RECT work; unsigned long flags; } SHADBUFFER_MONITORINFO;
+typedef int (*SHADBUFFER_ENUM)(void *, intptr_t);
 int MultiByteToWideChar(unsigned int, unsigned long, const char *, int, wchar_t *, int);
 int WideCharToMultiByte(unsigned int, unsigned long, const wchar_t *, int, char *, int, const char *, int *);
 int PlaySoundW(const wchar_t *, void *, unsigned long);
 void *GetForegroundWindow(void);
 int InternalGetWindowText(void *, wchar_t *, int);
-int GetWindowRect(void *, SHADOBS_RECT *);
+int GetWindowRect(void *, SHADBUFFER_RECT *);
 void *MonitorFromWindow(void *, unsigned long);
-int GetMonitorInfoW(void *, SHADOBS_MONITORINFO *);
-int EnumWindows(SHADOBS_ENUM, intptr_t);
+int GetMonitorInfoW(void *, SHADBUFFER_MONITORINFO *);
+int EnumWindows(SHADBUFFER_ENUM, intptr_t);
 unsigned long GetWindowThreadProcessId(void *, unsigned long *);
 unsigned long GetCurrentProcessId(void);
 int PostMessageW(void *, unsigned int, uintptr_t, intptr_t);
@@ -102,8 +102,8 @@ local function foreground_game()
     if window == nil then
         return nil
     end
-    local rect = ffi.new("SHADOBS_RECT")
-    local info = ffi.new("SHADOBS_MONITORINFO")
+    local rect = ffi.new("SHADBUFFER_RECT")
+    local info = ffi.new("SHADBUFFER_MONITORINFO")
     info.size = ffi.sizeof(info)
     local monitor = ffi.C.MonitorFromWindow(window, MONITOR_NEAREST)
     if ffi.C.GetWindowRect(window, rect) == 0 or ffi.C.GetMonitorInfoW(monitor, info) == 0 then
@@ -207,7 +207,7 @@ local function quit_obs()
     local me = ffi.C.GetCurrentProcessId()
     local main = {}
     local popups = {}
-    local callback = ffi.cast("SHADOBS_ENUM", function(window, param)
+    local callback = ffi.cast("SHADBUFFER_ENUM", function(window, param)
         local id = ffi.new("unsigned long[1]")
         ffi.C.GetWindowThreadProcessId(window, id)
         if id[0] == me then
@@ -266,7 +266,7 @@ local function check_commands()
 end
 
 function script_description()
-    return "Sorts clips by game, plays a sound when one saves, and takes commands from the ShadOBS overlay."
+    return "Sorts clips by game, plays a sound when one saves, and takes commands from the ShadBuffer overlay."
 end
 
 function script_defaults(settings)

@@ -5,7 +5,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public sealed class MainForm : Form
     {

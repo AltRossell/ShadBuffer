@@ -3,7 +3,7 @@ using System.IO;
 using System.Security.Principal;
 using Microsoft.Win32;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class WindowsTweaks
     {
@@ -85,7 +85,7 @@ namespace ShadOBS
             dynamic shell = Activator.CreateInstance(shellType);
             dynamic link = shell.CreateShortcut(StartMenuShortcut());
             link.TargetPath = exe;
-            link.Description = "Set up or remove ShadOBS";
+            link.Description = "Set up or remove ShadBuffer";
             link.Save();
         }
 

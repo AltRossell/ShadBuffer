@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class ProfileWriter
     {
@@ -187,7 +187,7 @@ ReplayBuffer={hotkey.ToObsJson()}
         public static void WriteAssets(Context ctx)
         {
             Directory.CreateDirectory(ctx.AppDir);
-            CopyResource("shadobs.lua", ctx.ScriptPath);
+            CopyResource("shadbuffer.lua", ctx.ScriptPath);
             CopyResource("saved.wav", ctx.SoundPath);
         }
 

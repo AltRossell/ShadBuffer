@@ -5,10 +5,10 @@ shadowplay keeps turning itself off on me because of drm errors so i made this. 
 
 **install**
 
-download `ShadOBS.exe` below, run it, click set up and accept the admin prompt. or paste this in powershell:
+download `ShadBuffer.exe` below, run it, click set up and accept the admin prompt. or paste this in powershell:
 
 ```
-irm https://raw.githubusercontent.com/seandotnet/ShadOBS/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/seandotnet/ShadBuffer/main/install.ps1 | iex
 ```
 
 windows might show a smartscreen warning because the exe isnt signed. click more info then run anyway. needs windows 10 or 11.

@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class Program
     {

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class Setup
     {
@@ -186,7 +186,7 @@ namespace ShadOBS
             if (ctx.IsSandbox)
             {
                 string exe = Obs.ExePath(root);
-                Process.Start(new ProcessStartInfo(exe, "--portable --disable-updater " + Obs.LaunchArgs)
+                Process.Start(new ProcessStartInfo(exe, "--portable --disable-updater --multi " + Obs.LaunchArgs)
                 {
                     UseShellExecute = true,
                     WorkingDirectory = Path.GetDirectoryName(exe),

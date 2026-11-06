@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public sealed class ObsStatus
     {
@@ -23,6 +23,7 @@ namespace ShadOBS
 
         private const int AckTimeoutMs = 2500;
         private const int ObsExitTimeoutMs = 20000;
+        private const int ForceEndWaitMs = 8000;
 
         public static ObsStatus ReadStatus(Context ctx)
         {
@@ -123,7 +124,7 @@ namespace ShadOBS
             }
             if (!Send(ctx, on ? Start : Stop))
             {
-                throw new SetupException("OBS is open on a different profile, so ShadOBS can't control it.");
+                throw new SetupException("OBS is open on a different profile, so ShadBuffer can't control it.");
             }
         }
 
@@ -175,10 +176,14 @@ namespace ShadOBS
                 if (!Obs.WaitForExit(ctx, ObsExitTimeoutMs))
                 {
                     string popup = Obs.VisiblePopup(ctx);
-                    ctx.Log("OBS didn't close, popup: " + (popup ?? "none"));
-                    throw new SetupException(popup == null
-                        ? "OBS didn't close. Close it and apply again."
-                        : $"OBS didn't close because \"{popup}\" is open. Close that popup and apply again.");
+                    ctx.Log("OBS is stuck closing, ending it. Popup: " + (popup ?? "none"));
+                    Obs.ForceEnd(ctx);
+                    if (!Obs.WaitForExit(ctx, ForceEndWaitMs))
+                    {
+                        throw new SetupException(popup == null
+                            ? "OBS didn't close. Close it and apply again."
+                            : $"OBS didn't close because \"{popup}\" is open. Close that popup and apply again.");
+                    }
                 }
             }
 

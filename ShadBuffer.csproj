@@ -5,11 +5,11 @@
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <LangVersion>latest</LangVersion>
-    <RootNamespace>ShadOBS</RootNamespace>
-    <AssemblyName>ShadOBS</AssemblyName>
+    <RootNamespace>ShadBuffer</RootNamespace>
+    <AssemblyName>ShadBuffer</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.2.0</Version>
-    <Product>ShadOBS</Product>
+    <Version>0.3.0</Version>
+    <Product>ShadBuffer</Product>
     <Description>Sets up OBS as an always-on clip recorder</Description>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <DebugType>none</DebugType>
@@ -18,7 +18,7 @@
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />
     <Reference Include="Microsoft.CSharp" />
-    <EmbeddedResource Include="assets\shadobs.lua" LogicalName="shadobs.lua" />
+    <EmbeddedResource Include="assets\shadbuffer.lua" LogicalName="shadbuffer.lua" />
     <EmbeddedResource Include="assets\saved.wav" LogicalName="saved.wav" />
   </ItemGroup>
 

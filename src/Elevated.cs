@@ -5,7 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Security.Principal;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     // the one bit that needs admin: closing a tray obs, installing obs, the startup task
     public static class Elevated

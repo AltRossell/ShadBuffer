@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class Shell
     {

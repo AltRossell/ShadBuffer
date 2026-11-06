@@ -8,12 +8,12 @@ using System.Text;
 using System.Threading;
 using Microsoft.Win32;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class Obs
     {
         public static readonly Version MinVersion = new Version(31, 0);
-        public const string LaunchArgs = "--profile \"ShadOBS\" --collection \"ShadOBS\" --startreplaybuffer --minimize-to-tray";
+        public const string LaunchArgs = "--profile \"ShadBuffer\" --collection \"ShadBuffer\" --startreplaybuffer --minimize-to-tray";
 
         private const uint WmClose = 0x0010;
         private const int CloseRetryMs = 1000;
@@ -71,6 +71,20 @@ namespace ShadOBS
         {
             Process first = Running(ctx).FirstOrDefault();
             return first?.Id ?? 0;
+        }
+
+        // obs can hang on its way out, ending its task stops an admin obs without a prompt
+        public static void ForceEnd(Context ctx)
+        {
+            if (!ctx.IsSandbox)
+            {
+                StartupTask.End();
+                return;
+            }
+            foreach (Process process in Running(ctx))
+            {
+                process.Kill();
+            }
         }
 
         public static bool WaitForExit(Context ctx, int timeoutMs)

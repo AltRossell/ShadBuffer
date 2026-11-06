@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Web.Script.Serialization;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     // what setup changed so remove can put it all back
     public sealed class State

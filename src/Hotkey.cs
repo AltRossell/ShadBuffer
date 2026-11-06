@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public sealed class Hotkey
     {

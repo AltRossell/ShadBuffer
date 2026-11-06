@@ -1,11 +1,11 @@
 using System;
 using System.IO;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public sealed class Context
     {
-        public const string AppName = "ShadOBS";
+        public const string AppName = "ShadBuffer";
 
         public string ConfigDir { get; set; }
         public string AppDir { get; set; }
@@ -18,7 +18,7 @@ namespace ShadOBS
         public string SettingsPath => Path.Combine(AppDir, "settings.json");
         public string CommandPath => Path.Combine(AppDir, "command.txt");
         public string StatusPath => Path.Combine(AppDir, "status.txt");
-        public string ScriptPath => Path.Combine(AppDir, "shadobs.lua");
+        public string ScriptPath => Path.Combine(AppDir, "shadbuffer.lua");
         public string SoundPath => Path.Combine(AppDir, "saved.wav");
         public string LogPath => Path.Combine(AppDir, "setup.log");
         public string InstalledExe => Path.Combine(AppDir, AppName + ".exe");
@@ -43,7 +43,7 @@ namespace ShadOBS
             {
                 SandboxObsRoot = obsRoot,
                 ConfigDir = Path.Combine(obsRoot, "config", "obs-studio"),
-                AppDir = Path.Combine(obsRoot, "shadobs-app"),
+                AppDir = Path.Combine(obsRoot, "shadbuffer-app"),
                 ClipsDir = Path.Combine(obsRoot, "clips"),
             };
         }

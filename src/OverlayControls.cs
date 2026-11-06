@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     public static class Theme
     {

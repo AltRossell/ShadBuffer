@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     // a normal solid window that only exists while it's open, it never touches the game
     public sealed class OverlayForm : Form

@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography.X509Certificates;
 using System.Web.Script.Serialization;
 
-namespace ShadOBS
+namespace ShadBuffer
 {
     // only runs inside the elevated step
     public static class ObsInstaller
@@ -38,7 +38,7 @@ namespace ShadOBS
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
             using (var web = new WebClient())
             {
-                web.Headers[HttpRequestHeader.UserAgent] = "ShadOBS-setup";
+                web.Headers[HttpRequestHeader.UserAgent] = "ShadBuffer-setup";
                 string json = web.DownloadString(ReleaseApi);
                 var release = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(json);
                 var assets = ((IEnumerable)release["assets"]).Cast<Dictionary<string, object>>();
@@ -49,7 +49,7 @@ namespace ShadOBS
                 }
 
                 string target = Path.Combine(folder, (string)asset["name"]);
-                web.Headers[HttpRequestHeader.UserAgent] = "ShadOBS-setup";
+                web.Headers[HttpRequestHeader.UserAgent] = "ShadBuffer-setup";
                 web.DownloadFile((string)asset["browser_download_url"], target);
                 return target;
             }
@@ -101,7 +101,7 @@ namespace ShadOBS
 
         private static void InstallFromRelease()
         {
-            string folder = Path.Combine(Path.GetTempPath(), "shadobs-" + Guid.NewGuid());
+            string folder = Path.Combine(Path.GetTempPath(), "shadbuffer-" + Guid.NewGuid());
             Directory.CreateDirectory(folder);
             try
             {
