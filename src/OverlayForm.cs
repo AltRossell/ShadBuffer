@@ -1,10 +1,7 @@
 using System;
-using System.Collections.Generic;
 using System.Drawing;
-using System.IO;
-using System.Linq;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace ShadBuffer
@@ -12,39 +9,50 @@ namespace ShadBuffer
     // a normal solid window that only exists while it's open, it never touches the game
     public sealed class OverlayForm : Form
     {
-        private const int LabelWidth = 170;
-        private const int ControlLeft = 180;
-        private const int ControlWidth = 308;
-        private const int RowHeight = 36;
-        private const int PanelLeft = 24;
-        private const int PanelTop = 208;
-        private const int PanelWidth = 492;
-        private const int PanelHeight = 300;
+        private const int DockWidth = 378;
+        private const int HeaderHeight = 56;
+        private const int TabsTop = 60;
+        private const int TabsHeight = 52;
+        private const int RowsTop = 121;
+        private const int RowHeight = 62;
+        private const int SaveBarHeight = 44;
+        private const int SaveBarGap = 10;
+        private const int MicHeight = 64;
+        private const int MessageHeight = 72;
         private const int CornerPreference = 33;
-        private const int CornerRound = 2;
+        private const int CornerNone = 1;
         private const int StatusGraceSeconds = 15;
+        private const int MessageSeconds = 5;
 
         private readonly Context ctx;
         private readonly Settings draft;
         private readonly Companion owner;
         private readonly IntPtr previousWindow;
+        private readonly Rectangle screen;
         private readonly Timer statusTimer;
-        private readonly Label statusLabel;
-        private readonly Label replayDetail;
-        private readonly Label messageLabel;
-        private readonly ToggleSwitch replaySwitch;
-        private readonly Button applyButton;
-        private readonly List<Button> tabButtons = new List<Button>();
-        private readonly List<Panel> tabPanels = new List<Panel>();
-        private readonly Panel tabMarker;
+        private readonly LibraryTab clipsTab = new LibraryTab("Clips", Icons.Film);
+        private readonly LibraryTab recordingsTab = new LibraryTab("Recordings", Icons.Video);
+        private readonly SidebarRow recordRow = new SidebarRow("Record") { Clickable = true };
+        private readonly SidebarRow replayRow = new SidebarRow("Instant Replay") { Icon = Icons.History };
+        private readonly SidebarRow shotRow = new SidebarRow("Screenshot") { Icon = Icons.Photo, Clickable = true, Trail = Icons.Camera };
+        private readonly SidebarRow micRow = new SidebarRow("Microphone") { Icon = Icons.Mic };
+        private readonly ToggleSwitch replaySwitch = new ToggleSwitch();
+        private readonly ActionButton saveButton = new ActionButton("Save clip", null, true);
+        private readonly Label micValue = new Label { ForeColor = Theme.Text, BackColor = Theme.Background, TextAlign = ContentAlignment.MiddleCenter };
+        private readonly Label messageLabel = new Label { ForeColor = Theme.Muted, BackColor = Theme.Background, TextAlign = ContentAlignment.BottomLeft };
 
         private Settings saved;
-        private bool busy;
-        private bool dialogOpen;
+        private GalleryForm gallery;
+        private bool recording;
+        private bool micOn;
         private bool switching;
-        private DateTime ignoreStatusUntil = DateTime.MinValue;
-        private Label captureHelp;
-        private FlatCombo monitorCombo;
+        private bool restoreFocus = true;
+        private DateTime ignoreReplayUntil = DateTime.MinValue;
+        private DateTime ignoreMicUntil = DateTime.MinValue;
+        private DateTime messageUntil = DateTime.MinValue;
+
+        public bool Busy { get; set; }
+        public bool DialogOpen { get; set; }
 
         public OverlayForm(Context ctx, Settings draft, Companion owner)
         {
@@ -54,10 +62,12 @@ namespace ShadBuffer
             saved = Settings.Load(ctx);
             previousWindow = GetForegroundWindow();
 
+            // opening on a different monitor than the main one needs that monitor's scale from the start
+            Ui.UseMonitorOf(previousWindow);
+            screen = (previousWindow != IntPtr.Zero ? Screen.FromHandle(previousWindow) : Screen.PrimaryScreen).Bounds;
+
             Text = Context.AppName;
-            AutoScaleDimensions = new SizeF(96F, 96F);
-            AutoScaleMode = AutoScaleMode.Dpi;
-            ClientSize = new Size(540, 590);
+            AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             TopMost = true;
@@ -65,60 +75,28 @@ namespace ShadBuffer
             KeyPreview = true;
             BackColor = Theme.Background;
             ForeColor = Theme.Text;
-            Font = new Font("Segoe UI", 9.75F);
+            Font = Ui.Text(13);
+            Bounds = new Rectangle(screen.Left, screen.Top, Ui.S(DockWidth), screen.Height);
+            MaximumSize = Size;
 
-            Controls.Add(NewLabel(Context.AppName, new Point(PanelLeft, 14), new Size(200, 38), Theme.Text, 18F, FontStyle.Bold));
-            statusLabel = NewLabel("", new Point(216, 24), new Size(300, 22), Theme.Muted, 9.75F);
-            statusLabel.TextAlign = ContentAlignment.MiddleRight;
-            Controls.Add(statusLabel);
-
-            Controls.Add(NewLabel("Instant replay", new Point(PanelLeft, 58), new Size(300, 24), Theme.Text, 11F, FontStyle.Bold));
-            replayDetail = NewLabel("", new Point(PanelLeft, 82), new Size(400, 20), Theme.Muted, 9.25F);
-            Controls.Add(replayDetail);
-            replaySwitch = new ToggleSwitch { Location = new Point(468, 66), Checked = saved.ReplayEnabled };
-            replaySwitch.Toggled += (_, __) => ToggleReplay();
-            Controls.Add(replaySwitch);
-
-            Button saveButton = NewButton("Save clip", new Point(PanelLeft, 114), new Size(240, 38));
-            saveButton.BackColor = Theme.Accent;
-            saveButton.FlatAppearance.BorderSize = 0;
-            saveButton.Click += (_, __) => owner.SaveClip();
-            Button clipsButton = NewButton("Open clips", new Point(276, 114), new Size(240, 38));
-            clipsButton.Click += (_, __) => owner.OpenClips();
-            Controls.Add(saveButton);
-            Controls.Add(clipsButton);
-
-            tabMarker = new Panel { BackColor = Theme.Accent, Size = new Size(123, 2) };
-            AddTab("Clips", BuildClipsTab());
-            AddTab("Video", BuildVideoTab());
-            AddTab("Audio", BuildAudioTab());
-            AddTab("Startup", BuildStartupTab());
-            Controls.Add(tabMarker);
-            SelectTab(0);
-
-            messageLabel = NewLabel("", new Point(PanelLeft, 516), new Size(360, 40), Theme.Muted, 9F);
+            BuildHeader();
+            BuildTabs();
+            BuildRows();
+            BuildMic();
             Controls.Add(messageLabel);
-            Hotkey overlayKey = Hotkey.Parse(saved.OverlayHotkey);
-            Controls.Add(NewLabel((overlayKey?.ToString() ?? "Esc") + " or Esc to close", new Point(PanelLeft, 558), new Size(300, 20), Theme.Muted, 8.5F));
+            messageLabel.Font = Ui.Text(12.5F);
+            messageLabel.SetBounds(Ui.S(16), ClientSize.Height - Ui.S(MicHeight + MessageHeight) - 1, ClientSize.Width - Ui.S(32), Ui.S(MessageHeight - 8));
 
-            applyButton = NewButton("Apply", new Point(396, 524), new Size(120, 40));
-            applyButton.Click += (_, __) => ApplyChanges();
-            Controls.Add(applyButton);
+            micOn = saved.RecordMic;
+            replaySwitch.Checked = saved.ReplayEnabled;
+            UpdateHotkeyText();
 
             statusTimer = new Timer { Interval = 1000 };
             statusTimer.Tick += (_, __) => UpdateStatus();
             statusTimer.Start();
-
             UpdateStatus();
-            UpdateDirty();
 
-            Deactivate += (_, __) =>
-            {
-                if (!busy && !dialogOpen && !IsDisposed)
-                {
-                    BeginInvoke(new Action(Close));
-                }
-            };
+            Deactivate += (_, __) => CheckFocusSoon();
             KeyDown += (_, e) =>
             {
                 if (e.KeyCode == Keys.Escape)
@@ -130,21 +108,54 @@ namespace ShadBuffer
 
         public void CloseIfIdle()
         {
-            if (!busy)
+            if (!Busy && !DialogOpen)
             {
                 Close();
             }
         }
 
+        // show in folder and the like, the new window should stay on top of the game
+        public void CloseForOtherApp()
+        {
+            restoreFocus = false;
+            CloseIfIdle();
+        }
+
+        // focus moving to the gallery counts as a deactivate too, so this waits to see where it landed
+        public void CheckFocusSoon()
+        {
+            if (IsDisposed || !IsHandleCreated)
+            {
+                return;
+            }
+            BeginInvoke(new Action(() =>
+            {
+                if (!IsDisposed && !Busy && !DialogOpen && ActiveForm == null)
+                {
+                    Close();
+                }
+            }));
+        }
+
+        public void UpdateTabs()
+        {
+            bool open = gallery != null && gallery.Visible && !gallery.ShowingSettings;
+            clipsTab.Selected = open && gallery.Kind == LibraryKind.Clips;
+            recordingsTab.Selected = open && gallery.Kind == LibraryKind.Recordings;
+        }
+
+        public void OnApplied(Settings applied)
+        {
+            saved = applied;
+            owner.OnApplied(applied);
+            UpdateHotkeyText();
+        }
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            int corner = CornerRound;
+            int corner = CornerNone;
             DwmSetWindowAttribute(Handle, CornerPreference, ref corner, sizeof(int));
-
-            Screen screen = previousWindow != IntPtr.Zero ? Screen.FromHandle(previousWindow) : Screen.PrimaryScreen;
-            Rectangle area = screen.Bounds;
-            Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
         }
 
         protected override void OnShown(EventArgs e)
@@ -158,338 +169,171 @@ namespace ShadBuffer
             base.OnPaint(e);
             using (var pen = new Pen(Theme.Border))
             {
-                e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+                int right = ClientSize.Width - 1;
+                e.Graphics.DrawLine(pen, right, 0, right, ClientSize.Height);
+                e.Graphics.DrawLine(pen, Ui.S(12), Ui.S(TabsTop + TabsHeight), right - Ui.S(12), Ui.S(TabsTop + TabsHeight));
+                int micTop = ClientSize.Height - Ui.S(MicHeight) - 1;
+                e.Graphics.DrawLine(pen, Ui.S(12), micTop, right - Ui.S(12), micTop);
             }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            base.OnFormClosing(e);
+            gallery?.Close();
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             statusTimer.Dispose();
-            if (previousWindow != IntPtr.Zero)
+            if (restoreFocus && previousWindow != IntPtr.Zero)
             {
                 SetForegroundWindow(previousWindow);
             }
             base.OnFormClosed(e);
         }
 
-        private Panel BuildClipsTab()
+        private void BuildHeader()
         {
-            Panel panel = NewTabPanel();
-            int y = 0;
-
-            AddRow(panel, ref y, "Clip length", NewCombo(new[]
+            var header = new Panel { BackColor = Theme.Panel, Bounds = new Rectangle(0, 0, ClientSize.Width - 1, Ui.S(HeaderHeight)) };
+            header.Controls.Add(new Label
             {
-                new Choice("30 seconds", 30),
-                new Choice("1 minute", 60),
-                new Choice("2 minutes", 120),
-                new Choice("3 minutes", 180),
-                new Choice("5 minutes", 300),
-                new Choice("10 minutes", 600),
-            }, draft.ClipSeconds, value => draft.ClipSeconds = (int)value));
-
-            AddRow(panel, ref y, "Save clip hotkey", NewHotkeyBox(draft.SaveHotkey, hotkey =>
-            {
-                draft.SaveHotkey = hotkey.ToString();
-                if (hotkey.ToString() != saved.OverlayHotkey && !owner.IsHotkeyFree(hotkey))
-                {
-                    ShowMessage($"Another app also uses {hotkey}. It should still save clips, but that app may react to it too.");
-                }
-            }));
-
-            AddRow(panel, ref y, "Overlay hotkey", NewHotkeyBox(draft.OverlayHotkey, hotkey =>
-            {
-                if (hotkey.ToString() != saved.OverlayHotkey && !owner.IsHotkeyFree(hotkey))
-                {
-                    ShowMessage("Another app already uses that combo, so pick a different one.");
-                    return;
-                }
-                draft.OverlayHotkey = hotkey.ToString();
-            }));
-
-            var folder = new TextBox
-            {
-                ReadOnly = true,
-                BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Theme.Panel,
+                Text = Context.AppName,
+                Font = Ui.Text(20, FontStyle.Bold),
                 ForeColor = Theme.Text,
-                Text = draft.ClipsDir,
-                Width = ControlWidth - 48,
-            };
-            Button browse = NewButton("...", new Point(ControlLeft + ControlWidth - 40, y + 4), new Size(40, 26));
-            browse.Click += (_, __) => PickFolder(folder);
-            panel.Controls.Add(browse);
-            AddRow(panel, ref y, "Save clips to", folder, folder.Width);
-
-            AddToggleRow(panel, ref y, "Sound when saved", draft.SaveSound, value => draft.SaveSound = value);
-            AddToggleRow(panel, ref y, "Sort clips by game", draft.SortByGame, value => draft.SortByGame = value);
-            return panel;
-        }
-
-        private Panel BuildVideoTab()
-        {
-            Panel panel = NewTabPanel();
-            int y = 0;
-
-            AddRow(panel, ref y, "Capture", NewCombo(new[]
-            {
-                new Choice("Game capture", Settings.CaptureGame),
-                new Choice("Desktop capture", Settings.CaptureDesktop),
-            }, draft.Capture, value =>
-            {
-                draft.Capture = (string)value;
-                UpdateCaptureHelp();
-            }));
-
-            captureHelp = NewLabel("", new Point(ControlLeft, y), new Size(ControlWidth, 52), Theme.Muted, 8.75F);
-            panel.Controls.Add(captureHelp);
-            y += 54;
-
-            List<DisplayInfo> displays = SystemInfo.AllDisplays();
-            DisplayInfo primary = displays.FirstOrDefault(d => d.IsPrimary);
-            var monitors = displays
-                .Select(d => new Choice($"Display {d.Number} ({d.Width}x{d.Height}){(d.IsPrimary ? ", main" : "")}", d.MonitorId))
-                .ToArray();
-            string currentMonitor = string.IsNullOrEmpty(draft.MonitorId) ? primary?.MonitorId : draft.MonitorId;
-            monitorCombo = NewCombo(monitors, currentMonitor, value => draft.MonitorId = (string)value);
-            AddRow(panel, ref y, "Monitor to record", monitorCombo);
-
-            AddRow(panel, ref y, "Quality", NewCombo(new[]
-            {
-                new Choice("Highest (big files)", 16),
-                new Choice("High", 20),
-                new Choice("Medium", 24),
-                new Choice("Low (small files)", 28),
-            }, draft.Quality, value => draft.Quality = (int)value));
-
-            AddRow(panel, ref y, "Frame rate", NewCombo(new[]
-            {
-                new Choice("30 fps", 30),
-                new Choice("60 fps", 60),
-                new Choice("120 fps", 120),
-                new Choice("144 fps", 144),
-            }, draft.Fps, value => draft.Fps = (int)value));
-
-            var resolutions = new List<Choice> { new Choice("Same as monitor", 0) };
-            foreach (int height in new[] { 1440, 1080, 720 })
-            {
-                if (primary == null || height < primary.Height)
-                {
-                    resolutions.Add(new Choice(height + "p", height));
-                }
-            }
-            AddRow(panel, ref y, "Resolution", NewCombo(resolutions.ToArray(), draft.OutputHeight, value => draft.OutputHeight = (int)value));
-
-            State state = State.Load(ctx);
-            var codecs = new List<Choice>();
-            if (state.EncoderBrand != Encoders.BrandCpu)
-            {
-                codecs.Add(new Choice("H.264 (plays everywhere)", Encoders.CodecH264));
-                if (state.SupportsHevc)
-                {
-                    codecs.Add(new Choice("HEVC (smaller files)", Encoders.CodecHevc));
-                }
-                if (state.SupportsAv1)
-                {
-                    codecs.Add(new Choice("AV1 (smallest, less compatible)", Encoders.CodecAv1));
-                }
-            }
-            codecs.Add(new Choice("CPU x264 (slowest)", Encoders.CodecCpu));
-            AddRow(panel, ref y, "Encoder", NewCombo(codecs.ToArray(), draft.Codec, value => draft.Codec = (string)value));
-
-            UpdateCaptureHelp();
-            return panel;
-        }
-
-        private Panel BuildAudioTab()
-        {
-            Panel panel = NewTabPanel();
-            int y = 0;
-
-            FlatCombo micCombo = null;
-            FlatCombo noiseCombo = null;
-            AddToggleRow(panel, ref y, "Record mic", draft.RecordMic, value =>
-            {
-                draft.RecordMic = value;
-                micCombo.Enabled = value;
-                noiseCombo.Enabled = value;
+                BackColor = Theme.Panel,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Bounds = new Rectangle(Ui.S(14), 0, Ui.S(240), header.Height),
             });
 
-            var mics = new List<Choice> { new Choice("Windows default", Settings.DeviceDefault) };
-            mics.AddRange(AudioDevices.Microphones().Select(d => new Choice(d.Name, d.Id)));
-            micCombo = NewCombo(mics.ToArray(), draft.MicDevice, value => draft.MicDevice = (string)value);
-            micCombo.Enabled = draft.RecordMic;
-            AddRow(panel, ref y, "Microphone", micCombo);
+            int square = Ui.S(44);
+            int top = (header.Height - square) / 2;
+            var close = new IconButton(Icons.Close) { BackColor = Theme.Panel, IconSize = 12, Bounds = new Rectangle(header.Width - square - Ui.S(6), top, square, square) };
+            var gear = new IconButton(Icons.Gear) { BackColor = Theme.Panel, IconSize = 16, Bounds = new Rectangle(close.Left - square - Ui.S(2), top, square, square) };
+            close.Click += (_, __) => CloseIfIdle();
+            gear.Click += (_, __) => ToggleSettings();
+            header.Controls.Add(gear);
+            header.Controls.Add(close);
+            Controls.Add(header);
+        }
 
-            noiseCombo = NewCombo(new[]
+        private void BuildTabs()
+        {
+            int half = (ClientSize.Width - 1 - Ui.S(24)) / 2;
+            clipsTab.SetBounds(Ui.S(12), Ui.S(TabsTop), half, Ui.S(TabsHeight));
+            recordingsTab.SetBounds(Ui.S(12) + half, Ui.S(TabsTop), half, Ui.S(TabsHeight));
+            clipsTab.Click += (_, __) => OpenTab(LibraryKind.Clips);
+            recordingsTab.Click += (_, __) => OpenTab(LibraryKind.Recordings);
+            Controls.Add(clipsTab);
+            Controls.Add(recordingsTab);
+        }
+
+        private void BuildRows()
+        {
+            int width = ClientSize.Width - 1;
+            int y = Ui.S(RowsTop);
+
+            recordRow.IconPainter = PaintRecordIcon;
+            recordRow.SetBounds(0, y, width, Ui.S(RowHeight));
+            recordRow.Click += (_, __) => owner.ToggleRecording();
+            y += Ui.S(RowHeight);
+
+            replayRow.SetBounds(0, y, width, Ui.S(RowHeight));
+            replaySwitch.Location = new Point(width - Ui.S(16) - replaySwitch.Width, (replayRow.Height - replaySwitch.Height) / 2);
+            replaySwitch.Toggled += (_, __) => ToggleReplay();
+            replayRow.Controls.Add(replaySwitch);
+            y += Ui.S(RowHeight);
+
+            saveButton.SetBounds(Ui.S(54), y, width - Ui.S(54 + 16), Ui.S(SaveBarHeight));
+            saveButton.Click += (_, __) => SaveClip();
+            y += Ui.S(SaveBarHeight + SaveBarGap);
+
+            shotRow.SetBounds(0, y, width, Ui.S(RowHeight));
+            shotRow.Click += (_, __) => owner.TakeScreenshot();
+
+            Controls.Add(recordRow);
+            Controls.Add(replayRow);
+            Controls.Add(saveButton);
+            Controls.Add(shotRow);
+        }
+
+        private void BuildMic()
+        {
+            int width = ClientSize.Width - 1;
+            micRow.SetBounds(0, ClientSize.Height - Ui.S(MicHeight), width, Ui.S(MicHeight));
+
+            int arrow = Ui.S(36);
+            int value = Ui.S(34);
+            int height = Ui.S(44);
+            int top = (micRow.Height - height) / 2;
+            var next = new IconButton(Icons.Right) { IconSize = 11, HoverColor = Theme.Panel, Bounds = new Rectangle(width - Ui.S(16) - arrow, top, arrow, height) };
+            micValue.Font = Ui.Text(14);
+            micValue.SetBounds(next.Left - value, top, value, height);
+            var previous = new IconButton(Icons.Left) { IconSize = 11, HoverColor = Theme.Panel, Bounds = new Rectangle(micValue.Left - arrow, top, arrow, height) };
+            next.Click += (_, __) => ToggleMic();
+            previous.Click += (_, __) => ToggleMic();
+            micRow.Controls.Add(previous);
+            micRow.Controls.Add(micValue);
+            micRow.Controls.Add(next);
+            Controls.Add(micRow);
+        }
+
+        private void PaintRecordIcon(Graphics graphics, Rectangle box)
+        {
+            Color color = recording ? Theme.Danger : Theme.Text;
+            int outer = Ui.S(16);
+            int inner = Ui.S(6);
+            int centerX = box.X + box.Width / 2;
+            int centerY = box.Y + box.Height / 2;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(color, Ui.Scale * 1.6F))
+            using (var brush = new SolidBrush(color))
             {
-                new Choice("Off", Settings.NoiseOff),
-                new Choice("RNNoise (better quality, more CPU)", Settings.NoiseRnnoise),
-                new Choice("Speex (lower quality, less CPU)", Settings.NoiseSpeex),
-            }, draft.NoiseSuppression, value => draft.NoiseSuppression = (string)value);
-            noiseCombo.Enabled = draft.RecordMic;
-            AddRow(panel, ref y, "Mic noise suppression", noiseCombo);
-
-            var outputs = new List<Choice> { new Choice("Windows default", Settings.DeviceDefault) };
-            outputs.AddRange(AudioDevices.Outputs().Select(d => new Choice(d.Name, d.Id)));
-            outputs.Add(new Choice("Off", Settings.DeviceOff));
-            AddRow(panel, ref y, "Game and desktop audio", NewCombo(outputs.ToArray(), draft.DesktopDevice, value => draft.DesktopDevice = (string)value));
-
-            AddToggleRow(panel, ref y, "Separate audio tracks", draft.SeparateTracks, value => draft.SeparateTracks = value);
-            panel.Controls.Add(NewLabel("Keeps a mix plus separate desktop and mic tracks for editing. Clips still play normally.", new Point(ControlLeft, y), new Size(ControlWidth, 40), Theme.Muted, 8.75F));
-            return panel;
-        }
-
-        private Panel BuildStartupTab()
-        {
-            Panel panel = NewTabPanel();
-            int y = 0;
-
-            AddToggleRow(panel, ref y, "Start at login", draft.StartAtLogin, value => draft.StartAtLogin = value);
-            AddToggleRow(panel, ref y, "Run OBS as admin", draft.RunAsAdmin, value => draft.RunAsAdmin = value);
-            panel.Controls.Add(NewLabel("Lets OBS capture games running as admin and gives it more GPU priority. Changing this asks for admin approval.", new Point(ControlLeft, y), new Size(ControlWidth, 56), Theme.Muted, 8.75F));
-            y += 58;
-            AddToggleRow(panel, ref y, "Turn off Game Bar capture", draft.GameBarOff, value => draft.GameBarOff = value);
-            return panel;
-        }
-
-        private void UpdateCaptureHelp()
-        {
-            bool desktop = draft.Capture == Settings.CaptureDesktop;
-            captureHelp.Text = desktop
-                ? "Records the whole monitor without touching the game. Notifications and other windows show up in clips."
-                : "Clean footage of just the game. It hooks into fullscreen games, so some anti-cheats may block it or object.";
-            monitorCombo.Enabled = desktop;
-        }
-
-        private void AddTab(string title, Panel panel)
-        {
-            int index = tabButtons.Count;
-            Button button = NewButton(title, new Point(PanelLeft + index * 123, 164), new Size(123, 34));
-            button.FlatAppearance.BorderSize = 0;
-            button.BackColor = Theme.Background;
-            button.Click += (_, __) => SelectTab(index);
-            tabButtons.Add(button);
-            tabPanels.Add(panel);
-            Controls.Add(button);
-            Controls.Add(panel);
-        }
-
-        private void SelectTab(int index)
-        {
-            for (int i = 0; i < tabPanels.Count; i++)
-            {
-                tabPanels[i].Visible = i == index;
-                tabButtons[i].ForeColor = i == index ? Theme.Text : Theme.Muted;
+                graphics.DrawEllipse(pen, centerX - outer / 2, centerY - outer / 2, outer, outer);
+                graphics.FillEllipse(brush, centerX - inner / 2, centerY - inner / 2, inner, inner);
             }
-            Button selected = tabButtons[index];
-            tabMarker.Location = new Point(selected.Left, selected.Bottom);
-            tabMarker.Width = selected.Width;
-            tabMarker.BringToFront();
         }
 
-        private Panel NewTabPanel()
+        private void OpenTab(LibraryKind kind)
         {
-            return new Panel
+            EnsureGallery();
+            if (gallery.Visible && !gallery.ShowingSettings && gallery.Kind == kind && gallery.AtLibraryRoot)
             {
-                Location = new Point(PanelLeft, PanelTop),
-                Size = new Size(PanelWidth, PanelHeight),
-                BackColor = Theme.Background,
-            };
-        }
-
-        private void AddRow(Panel panel, ref int y, string label, Control control, int width = ControlWidth)
-        {
-            panel.Controls.Add(NewLabel(label, new Point(0, y + 6), new Size(LabelWidth, 24), Theme.Text, 9.75F));
-            control.Location = new Point(ControlLeft, y + 4);
-            control.Width = width;
-            panel.Controls.Add(control);
-            y += RowHeight;
-        }
-
-        private void AddToggleRow(Panel panel, ref int y, string label, bool value, Action<bool> changed)
-        {
-            panel.Controls.Add(NewLabel(label, new Point(0, y + 6), new Size(LabelWidth, 24), Theme.Text, 9.75F));
-            var toggle = new ToggleSwitch { Location = new Point(ControlLeft, y + 5), Checked = value };
-            toggle.Toggled += (_, __) =>
-            {
-                changed(toggle.Checked);
-                UpdateDirty();
-            };
-            panel.Controls.Add(toggle);
-            y += RowHeight;
-        }
-
-        private FlatCombo NewCombo(Choice[] choices, object current, Action<object> changed)
-        {
-            var combo = new FlatCombo { Width = ControlWidth };
-            combo.Items.AddRange(choices.Cast<object>().ToArray());
-            int index = Array.FindIndex(choices, choice => Equals(choice.Value, current));
-            combo.SelectedIndex = index >= 0 ? index : 0;
-            combo.SelectedIndexChanged += (_, __) =>
-            {
-                changed(((Choice)combo.SelectedItem).Value);
-                UpdateDirty();
-            };
-            return combo;
-        }
-
-        private HotkeyBox NewHotkeyBox(string current, Action<Hotkey> changed)
-        {
-            var box = new HotkeyBox { Text = current };
-            box.CaptureChanged += capturing => owner.PauseOverlayHotkey(capturing);
-            box.Captured += hotkey =>
-            {
-                ShowMessage("");
-                changed(hotkey);
-                UpdateDirty();
-            };
-            return box;
-        }
-
-        private static Label NewLabel(string text, Point location, Size size, Color color, float fontSize, FontStyle style = FontStyle.Regular)
-        {
-            return new Label
-            {
-                Text = text,
-                Location = location,
-                Size = size,
-                ForeColor = color,
-                Font = new Font("Segoe UI", fontSize, style),
-                BackColor = Color.Transparent,
-            };
-        }
-
-        private static Button NewButton(string text, Point location, Size size)
-        {
-            var button = new Button
-            {
-                Text = text,
-                Location = location,
-                Size = size,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Theme.Panel,
-                ForeColor = Theme.Text,
-                UseVisualStyleBackColor = false,
-                TabStop = false,
-            };
-            button.FlatAppearance.BorderColor = Theme.Border;
-            return button;
-        }
-
-        private void PickFolder(TextBox folder)
-        {
-            dialogOpen = true;
-            using (var dialog = new FolderBrowserDialog { SelectedPath = draft.ClipsDir, Description = "Where should clips be saved?" })
-            {
-                if (dialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    draft.ClipsDir = dialog.SelectedPath;
-                    folder.Text = dialog.SelectedPath;
-                    UpdateDirty();
-                }
+                gallery.CloseGallery();
+                return;
             }
-            dialogOpen = false;
-            Activate();
+            gallery.ShowLibrary(kind);
+            UpdateTabs();
+        }
+
+        private void ToggleSettings()
+        {
+            EnsureGallery();
+            if (gallery.Visible && gallery.ShowingSettings)
+            {
+                gallery.CloseGallery();
+                return;
+            }
+            gallery.ShowSettings();
+            UpdateTabs();
+        }
+
+        private void EnsureGallery()
+        {
+            if (gallery == null)
+            {
+                gallery = new GalleryForm(ctx, owner, this, draft, screen);
+            }
+        }
+
+        private void SaveClip()
+        {
+            if (!replaySwitch.Checked)
+            {
+                ShowMessage("Turn on Instant Replay to save a clip.");
+                return;
+            }
+            owner.SaveClip();
         }
 
         private async void ToggleReplay()
@@ -497,8 +341,8 @@ namespace ShadBuffer
             bool on = replaySwitch.Checked;
             switching = true;
             replaySwitch.Enabled = false;
-            ignoreStatusUntil = DateTime.UtcNow.AddSeconds(StatusGraceSeconds);
-            string failure = await RunSafely(() => ObsControl.SetReplay(ctx, on));
+            ignoreReplayUntil = DateTime.UtcNow.AddSeconds(StatusGraceSeconds);
+            string failure = await Ui.RunSafely(ctx, () => ObsControl.SetReplay(ctx, on));
             switching = false;
             draft.ReplayEnabled = on;
             saved.ReplayEnabled = on;
@@ -508,123 +352,111 @@ namespace ShadBuffer
             }
             if (failure != null)
             {
-                ignoreStatusUntil = DateTime.MinValue;
+                ignoreReplayUntil = DateTime.MinValue;
                 ShowMessage(failure);
             }
             UpdateStatus();
         }
 
-        private async void ApplyChanges()
+        private async void ToggleMic()
         {
-            if (draft.SaveHotkey == draft.OverlayHotkey)
-            {
-                ShowMessage("The save and overlay hotkeys can't be the same.");
-                return;
-            }
-
-            busy = true;
-            applyButton.Enabled = false;
-            ShowMessage(saved.NeedsObsRestart(draft) ? "Applying. Recording restarts for a few seconds..." : "Applying...");
-
-            Settings next = draft.Clone();
-            string failure = await RunSafely(() => ObsControl.Apply(ctx, next));
-
-            busy = false;
+            bool on = !micOn;
+            micOn = on;
+            micValue.Text = on ? "On" : "Off";
+            ignoreMicUntil = DateTime.UtcNow.AddSeconds(StatusGraceSeconds);
+            string failure = await Ui.RunSafely(ctx, () => ObsControl.SetMic(ctx, on));
+            draft.RecordMic = on;
+            saved.RecordMic = on;
             if (IsDisposed)
             {
                 return;
             }
-            if (failure == null)
+            if (failure != null)
             {
-                saved = Settings.Load(ctx);
-                owner.OnApplied(saved);
-                ShowMessage("Saved.");
-            }
-            else
-            {
+                ignoreMicUntil = DateTime.MinValue;
                 ShowMessage(failure);
             }
-            UpdateDirty();
             UpdateStatus();
         }
 
-        private async Task<string> RunSafely(Action work)
+        private void UpdateHotkeyText()
         {
-            try
-            {
-                await Task.Run(work);
-                return null;
-            }
-            catch (SetupException e)
-            {
-                ctx.Log(e.Message);
-                return e.Message;
-            }
-            catch (Exception e)
-            {
-                ctx.Log(e.ToString());
-                return "Something went wrong: " + e.Message;
-            }
+            replayRow.Subtitle = HotkeyLine(saved.ReplayHotkey, "Toggle on/off");
+            shotRow.Subtitle = HotkeyLine(saved.ScreenshotHotkey, "Save a screenshot");
+            micRow.Subtitle = HotkeyLine(saved.MicHotkey, "Toggle on/off");
+            saveButton.Hint = saved.SaveHotkey;
+            UpdateRecordRow(null);
         }
 
-        private void UpdateDirty()
+        private string HotkeyLine(string hotkey, string action)
         {
-            if (applyButton == null)
+            if (string.IsNullOrEmpty(hotkey))
             {
-                return;
+                return action;
             }
-            bool dirty = !draft.SameAs(saved);
-            applyButton.Enabled = dirty && !busy;
-            applyButton.BackColor = dirty ? Theme.Accent : Theme.Panel;
-            applyButton.ForeColor = dirty ? Theme.Text : Theme.Muted;
+            return owner.HotkeyIsTaken(hotkey) ? hotkey + " is in use" : hotkey + " - " + action;
+        }
+
+        private void UpdateRecordRow(ObsStatus status)
+        {
+            bool wasRecording = recording;
+            recording = status?.Recording ?? recording;
+            string action = "Start";
+            if (recording)
+            {
+                TimeSpan elapsed = DateTime.UtcNow - (status?.RecordingSinceUtc ?? DateTime.UtcNow);
+                action = "Stop, recording " + Library.LengthText(elapsed < TimeSpan.Zero ? TimeSpan.Zero : elapsed);
+            }
+            recordRow.Subtitle = HotkeyLine(saved.RecordHotkey, action);
+            recordRow.Trail = recording ? Icons.Stop : Icons.Play;
+            recordRow.TrailColor = recording ? Theme.Danger : Theme.Text;
+            if (wasRecording != recording)
+            {
+                recordRow.Invalidate();
+            }
         }
 
         private void ShowMessage(string text)
         {
             messageLabel.Text = text;
+            messageUntil = DateTime.UtcNow.AddSeconds(MessageSeconds);
         }
 
         private void UpdateStatus()
         {
             ObsStatus status = ObsControl.ReadStatus(ctx);
-            if (!status.ObsRunning)
-            {
-                statusLabel.Text = "OBS isn't running";
-            }
-            else if (!status.ScriptRunning)
-            {
-                statusLabel.Text = Obs.VisiblePopup(ctx) != null ? "OBS is waiting on a popup" : "OBS is on another profile";
-            }
-            else if (!status.Replay)
-            {
-                statusLabel.Text = "Not recording";
-            }
-            else if (!string.IsNullOrEmpty(status.Game))
-            {
-                statusLabel.Text = "Recording " + status.Game;
-            }
-            else
-            {
-                statusLabel.Text = saved.Capture == Settings.CaptureDesktop ? "Recording monitor" : "Recording, waiting for a game";
-            }
+            UpdateRecordRow(status);
 
             // obs takes a few seconds to catch up after a click, so the switch doesn't flick back
-            if (DateTime.UtcNow >= ignoreStatusUntil || status.Replay == replaySwitch.Checked)
+            if (DateTime.UtcNow >= ignoreReplayUntil || status.Replay == replaySwitch.Checked)
             {
-                replaySwitch.Checked = status.Replay;
+                replaySwitch.Checked = status.ObsRunning ? status.Replay : saved.ReplayEnabled;
             }
             replaySwitch.Enabled = !switching && (!status.ObsRunning || status.ScriptRunning);
-            replayDetail.Text = status.Replay ? "Keeping the last " + FormatLength(saved.ClipSeconds) : "Off, nothing is being kept";
+
+            if (status.Mic != null && (DateTime.UtcNow >= ignoreMicUntil || status.Mic == micOn))
+            {
+                micOn = status.Mic.Value;
+            }
+            micValue.Text = micOn ? "On" : "Off";
+
+            if (DateTime.UtcNow >= messageUntil)
+            {
+                messageLabel.Text = ProblemText(status);
+            }
         }
 
-        private static string FormatLength(int seconds)
+        private string ProblemText(ObsStatus status)
         {
-            if (seconds < 60)
+            if (!status.ObsRunning)
             {
-                return seconds + " seconds";
+                return "OBS isn't running. Record and Instant Replay will start it.";
             }
-            int minutes = seconds / 60;
-            return minutes == 1 ? "1 minute" : minutes + " minutes";
+            if (!status.ScriptRunning)
+            {
+                return Obs.VisiblePopup(ctx) != null ? "OBS is waiting on a popup." : "OBS is on another profile, so ShadBuffer can't control it.";
+            }
+            return "";
         }
 
         [DllImport("user32.dll")]

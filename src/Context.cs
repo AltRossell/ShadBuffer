@@ -10,6 +10,7 @@ namespace ShadBuffer
         public string ConfigDir { get; set; }
         public string AppDir { get; set; }
         public string ClipsDir { get; set; }
+        public string RecordingsDir { get; set; }
         public string SandboxObsRoot { get; set; }
         public Action<string> Progress { get; set; } = _ => { };
 
@@ -18,6 +19,7 @@ namespace ShadBuffer
         public string SettingsPath => Path.Combine(AppDir, "settings.json");
         public string CommandPath => Path.Combine(AppDir, "command.txt");
         public string StatusPath => Path.Combine(AppDir, "status.txt");
+        public string UploadsPath => Path.Combine(AppDir, "uploads.json");
         public string ScriptPath => Path.Combine(AppDir, "shadbuffer.lua");
         public string SoundPath => Path.Combine(AppDir, "saved.wav");
         public string LogPath => Path.Combine(AppDir, "setup.log");
@@ -33,6 +35,7 @@ namespace ShadBuffer
                 ConfigDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "obs-studio"),
                 AppDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppName),
                 ClipsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Clips"),
+                RecordingsDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Recordings"),
             };
         }
 
@@ -45,6 +48,7 @@ namespace ShadBuffer
                 ConfigDir = Path.Combine(obsRoot, "config", "obs-studio"),
                 AppDir = Path.Combine(obsRoot, "shadbuffer-app"),
                 ClipsDir = Path.Combine(obsRoot, "clips"),
+                RecordingsDir = Path.Combine(obsRoot, "recordings"),
             };
         }
 

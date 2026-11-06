@@ -8,7 +8,7 @@
     <RootNamespace>ShadBuffer</RootNamespace>
     <AssemblyName>ShadBuffer</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Product>ShadBuffer</Product>
     <Description>Sets up OBS as an always-on clip recorder</Description>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -18,6 +18,11 @@
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />
     <Reference Include="Microsoft.CSharp" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="WindowsFormsIntegration" />
+    <Reference Include="System.Xaml" />
     <EmbeddedResource Include="assets\shadbuffer.lua" LogicalName="shadbuffer.lua" />
     <EmbeddedResource Include="assets\saved.wav" LogicalName="saved.wav" />
   </ItemGroup>

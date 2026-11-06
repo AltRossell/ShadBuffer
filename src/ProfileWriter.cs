@@ -23,11 +23,14 @@ namespace ShadBuffer
         {
             Directory.CreateDirectory(ctx.ProfileDir);
             Directory.CreateDirectory(settings.ClipsDir);
+            Directory.CreateDirectory(settings.RecordingsDir);
             string clips = settings.ClipsDir.Replace('\\', '/');
             int tracks = settings.SeparateTracks ? SplitRecordTracks : SingleTrack;
             int memoryMb = SystemInfo.ReplayMemoryMb(settings.ClipSeconds);
             Hotkey hotkey = Hotkey.Parse(settings.SaveHotkey) ?? Hotkey.Parse(FallbackSaveHotkey);
             OutputSize(canvas, settings.OutputHeight, out int outputWidth, out int outputHeight);
+            // hybrid survives a crash, but it flags every track as default so players pick the wrong one
+            string format = settings.SeparateTracks ? "mp4" : "hybrid_mp4";
 
             string ini = $@"[General]
 Name={Context.AppName}
@@ -44,7 +47,7 @@ RecRBPrefix=Replay
 Encoder={encoder.Id}
 RecType=Standard
 RecFilePath={clips}
-RecFormat2=mp4
+RecFormat2={format}
 RecUseRescale=false
 RecTracks={tracks}
 RecEncoder={encoder.Id}
@@ -155,6 +158,7 @@ ReplayBuffer={hotkey.ToObsJson()}
                                             { "capture_game", captureGame },
                                             { "sort_by_game", settings.SortByGame },
                                             { "save_sound", settings.SaveSound },
+                                            { "recordings_dir", settings.RecordingsDir.Replace('\\', '/') },
                                         }
                                     },
                                 },
@@ -170,15 +174,15 @@ ReplayBuffer={hotkey.ToObsJson()}
             {
                 collection["DesktopAudioDevice1"] = Source("wasapi_output_capture", "Desktop Audio", NewUuid(), Device(settings.DesktopDevice), settings.SeparateTracks ? SplitDesktopMixers : SingleTrack);
             }
-            if (settings.RecordMic)
+
+            // always there and just muted, so the overlay can flip it without restarting obs
+            var mic = Source("wasapi_input_capture", "Mic/Aux", NewUuid(), Device(settings.MicDevice), settings.SeparateTracks ? SplitMicMixers : SingleTrack);
+            mic["muted"] = !settings.RecordMic;
+            if (settings.NoiseSuppression != Settings.NoiseOff)
             {
-                var mic = Source("wasapi_input_capture", "Mic/Aux", NewUuid(), Device(settings.MicDevice), settings.SeparateTracks ? SplitMicMixers : SingleTrack);
-                if (settings.NoiseSuppression != Settings.NoiseOff)
-                {
-                    mic["filters"] = new object[] { NoiseFilter(settings.NoiseSuppression) };
-                }
-                collection["AuxAudioDevice1"] = mic;
+                mic["filters"] = new object[] { NoiseFilter(settings.NoiseSuppression) };
             }
+            collection["AuxAudioDevice1"] = mic;
 
             var serializer = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
             File.WriteAllText(ctx.CollectionPath, serializer.Serialize(collection));

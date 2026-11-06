@@ -10,6 +10,9 @@ namespace ShadBuffer
         public bool ObsRunning { get; set; }
         public bool ScriptRunning { get; set; }
         public bool Replay { get; set; }
+        public bool Recording { get; set; }
+        public DateTime? RecordingSinceUtc { get; set; }
+        public bool? Mic { get; set; }
         public string Game { get; set; }
     }
 
@@ -20,10 +23,17 @@ namespace ShadBuffer
         public const string Stop = "stop";
         public const string Save = "save";
         public const string Quit = "quit";
+        public const string RecordStart = "recordstart";
+        public const string RecordStop = "recordstop";
+        public const string Screenshot = "screenshot";
+        public const string MicOn = "micon";
+        public const string MicOff = "micoff";
 
         private const int AckTimeoutMs = 2500;
         private const int ObsExitTimeoutMs = 20000;
         private const int ForceEndWaitMs = 8000;
+        private const int ScriptWaitMs = 30000;
+        private const string OtherProfile = "OBS is open on a different profile, so ShadBuffer can't control it.";
 
         public static ObsStatus ReadStatus(Context ctx)
         {
@@ -62,6 +72,18 @@ namespace ShadBuffer
                         else if (key == "replay")
                         {
                             status.Replay = value == "on";
+                        }
+                        else if (key == "recording")
+                        {
+                            status.Recording = value == "on";
+                        }
+                        else if (key == "recordstart" && long.TryParse(value, out long seconds) && seconds > 0)
+                        {
+                            status.RecordingSinceUtc = DateTimeOffset.FromUnixTimeSeconds(seconds).UtcDateTime;
+                        }
+                        else if (key == "mic" && value != "none")
+                        {
+                            status.Mic = value == "on";
                         }
                         else if (key == "game")
                         {
@@ -124,14 +146,66 @@ namespace ShadBuffer
             }
             if (!Send(ctx, on ? Start : Stop))
             {
-                throw new SetupException("OBS is open on a different profile, so ShadBuffer can't control it.");
+                throw new SetupException(OtherProfile);
+            }
+        }
+
+        public static void SetMic(Context ctx, bool on)
+        {
+            Settings settings = Settings.Load(ctx);
+            settings.RecordMic = on;
+            settings.Save(ctx);
+
+            if (Obs.IsRunning(ctx) && !Send(ctx, on ? MicOn : MicOff))
+            {
+                throw new SetupException(OtherProfile);
+            }
+        }
+
+        public static void ToggleRecording(Context ctx)
+        {
+            EnsureScriptRunning(ctx);
+            if (!Send(ctx, ReadStatus(ctx).Recording ? RecordStop : RecordStart))
+            {
+                throw new SetupException(OtherProfile);
+            }
+        }
+
+        public static void TakeScreenshot(Context ctx)
+        {
+            EnsureScriptRunning(ctx);
+            if (!Send(ctx, Screenshot))
+            {
+                throw new SetupException(OtherProfile);
+            }
+        }
+
+        // with replay left off obs isn't open after a reboot, but record and screenshot still need it
+        private static void EnsureScriptRunning(Context ctx)
+        {
+            if (!Obs.IsRunning(ctx))
+            {
+                Setup.StartObs(ctx, Obs.FindRoot(ctx));
+            }
+            Stopwatch timer = Stopwatch.StartNew();
+            while (!ReadStatus(ctx).ScriptRunning)
+            {
+                if (timer.ElapsedMilliseconds > ScriptWaitMs)
+                {
+                    throw new SetupException(OtherProfile);
+                }
+                Thread.Sleep(250);
             }
         }
 
         public static void Apply(Context ctx, Settings next)
         {
             Settings current = Settings.Load(ctx);
-            next.ReplayEnabled = current.ReplayEnabled;
+            next.CopyLiveValues(current);
+            if (current.NeedsObsRestart(next) && ReadStatus(ctx).Recording)
+            {
+                throw new SetupException("Stop recording first, applying these changes restarts OBS.");
+            }
             State state = State.Load(ctx);
 
             if (current.RunAsAdmin != next.RunAsAdmin && !ctx.IsSandbox)

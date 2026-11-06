@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
+using System.Media;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,6 +19,10 @@ namespace ShadBuffer
         private const string QuitEventName = @"Local\ShadBuffer.Quit";
         private const int OverlayHotkeyId = 1;
         private const int TestHotkeyId = 2;
+        private const int RecordHotkeyId = 3;
+        private const int ScreenshotHotkeyId = 4;
+        private const int ReplayHotkeyId = 5;
+        private const int MicHotkeyId = 6;
         private const int WmHotkey = 0x0312;
         private const int QuitWaitMs = 5000;
         private const int SaveDelayMs = 300;
@@ -29,16 +35,21 @@ namespace ShadBuffer
         private readonly Icon iconOn = MakeIcon(Color.FromArgb(235, 64, 64));
         private readonly Icon iconOff = MakeIcon(Color.FromArgb(120, 120, 128));
 
+        private readonly HashSet<string> takenHotkeys = new HashSet<string>();
+
         private OverlayForm overlay;
         private Settings draft;
-        private int checkedObsId;
+        private int checkedReplayObsId;
+        private int checkedMicObsId;
+
+        public Uploader Uploads { get; }
 
         public Companion(Context ctx)
         {
             this.ctx = ctx;
             quitEvent = new EventWaitHandle(false, EventResetMode.ManualReset, QuitEventName);
 
-            window = new HotkeyWindow(ToggleOverlay);
+            window = new HotkeyWindow(OnHotkey);
             tray = new NotifyIcon { Icon = iconOff, Text = Context.AppName, Visible = true };
             tray.ContextMenuStrip = BuildMenu();
             tray.MouseClick += (_, e) =>
@@ -49,7 +60,11 @@ namespace ShadBuffer
                 }
             };
 
-            RegisterOverlayHotkey();
+            RegisterHotkeys();
+
+            // the menu above is the first real control, so the ui context exists from here on
+            Uploads = new Uploader(ctx);
+            Uploads.Changed += OnUploadChanged;
 
             timer = new System.Windows.Forms.Timer { Interval = 1000 };
             timer.Tick += (_, __) => Tick();
@@ -146,21 +161,27 @@ namespace ShadBuffer
             overlay.FormClosed += (_, __) =>
             {
                 overlay = null;
-                RegisterOverlayHotkey();
+                RegisterHotkeys();
             };
             overlay.Show();
         }
 
-        public void PauseOverlayHotkey(bool paused)
+        // windows swallows a registered combo, so a hotkey box couldn't see it otherwise
+        public void PauseHotkeys(bool paused)
         {
             if (paused)
             {
-                UnregisterHotKey(window.Handle, OverlayHotkeyId);
+                UnregisterHotkeys();
             }
             else
             {
-                RegisterOverlayHotkey();
+                RegisterHotkeys();
             }
+        }
+
+        public bool HotkeyIsTaken(string hotkey)
+        {
+            return takenHotkeys.Contains(hotkey);
         }
 
         // tells the overlay if another app already owns the combo
@@ -177,7 +198,7 @@ namespace ShadBuffer
         public void OnApplied(Settings saved)
         {
             draft = null;
-            RegisterOverlayHotkey();
+            RegisterHotkeys();
         }
 
         public void SaveClip()
@@ -192,6 +213,22 @@ namespace ShadBuffer
                     tray.ShowBalloonTip(3000, Context.AppName, "Couldn't save a clip because OBS isn't recording on the ShadBuffer profile.", ToolTipIcon.Warning);
                 }
             });
+        }
+
+        public void ToggleRecording()
+        {
+            bool starting = !ObsControl.ReadStatus(ctx).Recording;
+            if (starting)
+            {
+                overlay?.CloseIfIdle();
+            }
+            RunAfterFocus(starting ? SaveDelayMs : 0, () => ObsControl.ToggleRecording(ctx));
+        }
+
+        public void TakeScreenshot()
+        {
+            overlay?.CloseIfIdle();
+            RunAfterFocus(SaveDelayMs, () => ObsControl.TakeScreenshot(ctx));
         }
 
         public void OpenClips()
@@ -209,7 +246,7 @@ namespace ShadBuffer
                 timer.Dispose();
                 tray.Visible = false;
                 tray.Dispose();
-                UnregisterHotKey(window.Handle, OverlayHotkeyId);
+                UnregisterHotkeys();
                 window.DestroyHandle();
                 quitEvent.Dispose();
                 iconOn.Dispose();
@@ -250,17 +287,128 @@ namespace ShadBuffer
             {
                 ObsControl.Send(ctx, ObsControl.Quit);
             }
+            overlay?.Close();
             ExitThread();
         }
 
-        // windows keeps the old combo if the same id registers twice, so i always clear it first
-        private void RegisterOverlayHotkey()
+        private void RegisterHotkeys()
         {
-            UnregisterHotKey(window.Handle, OverlayHotkeyId);
-            Hotkey hotkey = Hotkey.Parse(Settings.Load(ctx).OverlayHotkey);
-            if (hotkey == null || !RegisterHotKey(window.Handle, OverlayHotkeyId, hotkey.Modifiers, hotkey.VirtualKey))
+            UnregisterHotkeys();
+            takenHotkeys.Clear();
+            Settings settings = Settings.Load(ctx);
+
+            Hotkey overlayKey = Hotkey.Parse(settings.OverlayHotkey);
+            if (overlayKey == null || !RegisterHotKey(window.Handle, OverlayHotkeyId, overlayKey.Modifiers, overlayKey.VirtualKey))
             {
                 tray.ShowBalloonTip(5000, Context.AppName, "The overlay hotkey is taken by another app. Open the overlay from this tray icon to change it.", ToolTipIcon.Warning);
+            }
+            RegisterOptional(RecordHotkeyId, settings.RecordHotkey);
+            RegisterOptional(ScreenshotHotkeyId, settings.ScreenshotHotkey);
+            RegisterOptional(ReplayHotkeyId, settings.ReplayHotkey);
+            RegisterOptional(MicHotkeyId, settings.MicHotkey);
+        }
+
+        // these stay quiet at login, the overlay shows which ones another app got first
+        private void RegisterOptional(int id, string combo)
+        {
+            Hotkey hotkey = Hotkey.Parse(combo);
+            if (hotkey != null && !RegisterHotKey(window.Handle, id, hotkey.Modifiers, hotkey.VirtualKey))
+            {
+                takenHotkeys.Add(combo);
+            }
+        }
+
+        // windows keeps the old combo if the same id registers twice, so these always clear first
+        private void UnregisterHotkeys()
+        {
+            foreach (int id in new[] { OverlayHotkeyId, RecordHotkeyId, ScreenshotHotkeyId, ReplayHotkeyId, MicHotkeyId })
+            {
+                UnregisterHotKey(window.Handle, id);
+            }
+        }
+
+        private void OnHotkey(int id)
+        {
+            switch (id)
+            {
+                case OverlayHotkeyId:
+                    ToggleOverlay();
+                    break;
+                case RecordHotkeyId:
+                    ToggleRecording();
+                    break;
+                case ScreenshotHotkeyId:
+                    TakeScreenshot();
+                    break;
+                case ReplayHotkeyId:
+                    ToggleReplayFromHotkey();
+                    break;
+                case MicHotkeyId:
+                    ToggleMicFromHotkey();
+                    break;
+            }
+        }
+
+        private void ToggleReplayFromHotkey()
+        {
+            bool on = !Settings.Load(ctx).ReplayEnabled;
+            RunAfterFocus(0, () =>
+            {
+                ObsControl.SetReplay(ctx, on);
+                PlayToggleSound();
+            });
+        }
+
+        private void ToggleMicFromHotkey()
+        {
+            bool on = !Settings.Load(ctx).RecordMic;
+            RunAfterFocus(0, () =>
+            {
+                ObsControl.SetMic(ctx, on);
+                PlayToggleSound();
+            });
+        }
+
+        // there's nothing on screen in game, so a sound is the only way to know it worked
+        private void PlayToggleSound()
+        {
+            if (Settings.Load(ctx).SaveSound && File.Exists(ctx.SoundPath))
+            {
+                using (var player = new SoundPlayer(ctx.SoundPath))
+                {
+                    player.Play();
+                }
+            }
+        }
+
+        private void RunAfterFocus(int delayMs, Action work)
+        {
+            Task.Run(async () =>
+            {
+                // the game needs focus back first so it gets sorted under the right name
+                await Task.Delay(delayMs);
+                try
+                {
+                    work();
+                }
+                catch (SetupException e)
+                {
+                    ctx.Log(e.Message);
+                    tray.ShowBalloonTip(5000, Context.AppName, e.Message, ToolTipIcon.Warning);
+                }
+                catch (Exception e)
+                {
+                    ctx.Log(e.ToString());
+                    tray.ShowBalloonTip(5000, Context.AppName, "Something went wrong: " + e.Message, ToolTipIcon.Warning);
+                }
+            });
+        }
+
+        private void OnUploadChanged(UploadJob job)
+        {
+            if (job.State == UploadState.Done && overlay == null)
+            {
+                tray.ShowBalloonTip(5000, Context.AppName, "Your upload is ready. Open the overlay to copy the link.", ToolTipIcon.Info);
             }
         }
 
@@ -274,11 +422,12 @@ namespace ShadBuffer
             }
 
             ObsStatus status = ObsControl.ReadStatus(ctx);
-            tray.Icon = status.Replay ? iconOn : iconOff;
-            string text = status.Replay ? "Recording" : status.ObsRunning ? "Replay off" : "OBS isn't running";
+            tray.Icon = status.Replay || status.Recording ? iconOn : iconOff;
+            string text = status.Recording ? "Recording" : status.Replay ? "Instant Replay on" : status.ObsRunning ? "Instant Replay off" : "OBS isn't running";
             tray.Text = Truncate(Context.AppName + ": " + text);
 
             EnforceReplayOff(status);
+            EnforceMic(status);
         }
 
         // obs always starts its buffer at login, so i turn it back off if the user left it off
@@ -289,14 +438,34 @@ namespace ShadBuffer
                 return;
             }
             int id = Obs.ProcessId(ctx);
-            if (id == checkedObsId)
+            if (id == checkedReplayObsId)
             {
                 return;
             }
-            checkedObsId = id;
+            checkedReplayObsId = id;
             if (!Settings.Load(ctx).ReplayEnabled)
             {
                 Task.Run(() => ObsControl.Send(ctx, ObsControl.Stop));
+            }
+        }
+
+        // the mic can be flipped while obs is closed, and obs reopens the way it last saved it
+        private void EnforceMic(ObsStatus status)
+        {
+            if (!status.ScriptRunning || status.Mic == null)
+            {
+                return;
+            }
+            int id = Obs.ProcessId(ctx);
+            if (id == checkedMicObsId)
+            {
+                return;
+            }
+            checkedMicObsId = id;
+            bool on = Settings.Load(ctx).RecordMic;
+            if (status.Mic != on)
+            {
+                Task.Run(() => ObsControl.Send(ctx, on ? ObsControl.MicOn : ObsControl.MicOff));
             }
         }
 
@@ -327,9 +496,9 @@ namespace ShadBuffer
 
         private sealed class HotkeyWindow : NativeWindow
         {
-            private readonly Action pressed;
+            private readonly Action<int> pressed;
 
-            public HotkeyWindow(Action pressed)
+            public HotkeyWindow(Action<int> pressed)
             {
                 this.pressed = pressed;
                 CreateHandle(new CreateParams());
@@ -337,9 +506,9 @@ namespace ShadBuffer
 
             protected override void WndProc(ref Message message)
             {
-                if (message.Msg == WmHotkey && message.WParam.ToInt32() == OverlayHotkeyId)
+                if (message.Msg == WmHotkey)
                 {
-                    pressed();
+                    pressed(message.WParam.ToInt32());
                 }
                 base.WndProc(ref message);
             }

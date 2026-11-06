@@ -34,10 +34,16 @@ local DESKTOP_FOLDER = "Desktop"
 local COMMAND_MS = 200
 local QUIT_RETRY_MS = 1000
 local QUIT_POPUP_TRIES = 5
+local MIC_CHANNEL = 3
+local RECORD_PATH_WAIT_MS = 10000
+local MOVE_WAIT_MS = 120000
+local OUTPUT_SECTION = "AdvOut"
+local OUTPUT_PATH_KEY = "RecFilePath"
 
 local capture_game = true
 local sort_by_game = true
 local save_sound = true
+local recordings_dir = ""
 
 local game = nil
 local connected = false
@@ -50,6 +56,13 @@ local quit_tries = 0
 local sound_file = nil
 local command_file = nil
 local status_file = nil
+local record_started = 0
+local record_game = nil
+local shot_game = nil
+local clips_path = nil
+local record_path_wait = 0
+local last_mic = nil
+local moves = {}
 
 local function wide(text)
     local size = ffi.C.MultiByteToWideChar(CP_UTF8, 0, text, -1, nil, 0)
@@ -121,9 +134,25 @@ local function foreground_game()
     return game_name(title, "")
 end
 
+local function mic_state()
+    local source = obs.obs_get_output_source(MIC_CHANNEL)
+    if source == nil then
+        return "none"
+    end
+    local muted = obs.obs_source_muted(source)
+    obs.obs_source_release(source)
+    return muted and "off" or "on"
+end
+
 local function write_status()
     local replay = obs.obs_frontend_replay_buffer_active() and "on" or "off"
-    local text = "script=on\nreplay=" .. replay .. "\ngame=" .. (game or "") .. "\n"
+    local recording = obs.obs_frontend_recording_active() and "on" or "off"
+    last_mic = mic_state()
+    local text = "script=on\nreplay=" .. replay
+        .. "\nrecording=" .. recording
+        .. "\nrecordstart=" .. record_started
+        .. "\nmic=" .. last_mic
+        .. "\ngame=" .. (game or "") .. "\n"
     obs.os_quick_write_utf8_file(status_file, text, #text, false)
 end
 
@@ -167,37 +196,95 @@ local function apply_desktop_visible()
     return true
 end
 
-local function move_clip(path)
+local function move_into_game_folder(path, folder, prefix)
+    if not sort_by_game or path == nil or path == "" then
+        return
+    end
     local dir, name = path:match("^(.*)[/\\]([^/\\]+)$")
     if dir == nil then
         return
     end
-    local folder = game or foreground_game() or DESKTOP_FOLDER
-    local stamp = name:gsub("^Replay%s*", "")
+    local stamp = name:gsub("^" .. prefix .. "%s*", "")
     local target_dir = dir .. "/" .. folder
     obs.os_mkdirs(target_dir)
-    local target = target_dir .. "/" .. folder .. " " .. stamp
-    if obs.os_rename(path, target) ~= 0 then
-        obs.script_log(obs.LOG_WARNING, "couldn't move clip to " .. target)
+    moves[#moves + 1] = { path = path, target = target_dir .. "/" .. folder .. " " .. stamp, wait = 0 }
+end
+
+-- obs says a recording stopped while it's still finishing the file, so this keeps trying
+local function run_moves()
+    for index = #moves, 1, -1 do
+        local move = moves[index]
+        move.wait = move.wait + COMMAND_MS
+        if obs.os_rename(move.path, move.target) == 0 then
+            table.remove(moves, index)
+        elseif move.wait >= MOVE_WAIT_MS then
+            obs.script_log(obs.LOG_WARNING, "couldn't move file to " .. move.target)
+            table.remove(moves, index)
+        end
     end
 end
 
-local function on_saved()
-    local path = obs.obs_frontend_get_last_replay()
-    if sort_by_game and path ~= nil and path ~= "" then
-        move_clip(path)
-    end
+local function play_sound()
     if save_sound then
         winmm.PlaySoundW(wide(sound_file), nil, SND_FILE_ASYNC)
     end
 end
 
+local function restore_clips_path()
+    if clips_path ~= nil then
+        obs.config_set_string(obs.obs_frontend_get_profile_config(), OUTPUT_SECTION, OUTPUT_PATH_KEY, clips_path)
+        clips_path = nil
+    end
+end
+
+-- replays and recordings share one obs path, so i only point it at recordings while one starts
+local function start_recording()
+    if obs.obs_frontend_recording_active() then
+        return
+    end
+    record_game = game or foreground_game()
+    if recordings_dir ~= "" and clips_path == nil then
+        local config = obs.obs_frontend_get_profile_config()
+        clips_path = obs.config_get_string(config, OUTPUT_SECTION, OUTPUT_PATH_KEY)
+        obs.os_mkdirs(recordings_dir)
+        obs.config_set_string(config, OUTPUT_SECTION, OUTPUT_PATH_KEY, recordings_dir)
+        record_path_wait = 0
+    end
+    obs.obs_frontend_recording_start()
+end
+
+local function set_mic(on)
+    local source = obs.obs_get_output_source(MIC_CHANNEL)
+    if source ~= nil then
+        obs.obs_source_set_muted(source, not on)
+        obs.obs_source_release(source)
+    end
+    status_dirty = true
+end
+
 local function on_event(event)
     if event == obs.OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED then
-        on_saved()
+        move_into_game_folder(obs.obs_frontend_get_last_replay(), game or foreground_game() or DESKTOP_FOLDER, "Replay")
+        play_sound()
     elseif event == obs.OBS_FRONTEND_EVENT_REPLAY_BUFFER_STARTED
         or event == obs.OBS_FRONTEND_EVENT_REPLAY_BUFFER_STOPPED then
         status_dirty = true
+    elseif event == obs.OBS_FRONTEND_EVENT_RECORDING_STARTED then
+        restore_clips_path()
+        record_started = os.time()
+        status_dirty = true
+        play_sound()
+    elseif event == obs.OBS_FRONTEND_EVENT_RECORDING_STOPPED then
+        restore_clips_path()
+        move_into_game_folder(obs.obs_frontend_get_last_recording(), record_game or game or foreground_game() or DESKTOP_FOLDER, "")
+        record_started = 0
+        record_game = nil
+        status_dirty = true
+        play_sound()
+    elseif event == obs.OBS_FRONTEND_EVENT_SCREENSHOT_TAKEN then
+        move_into_game_folder(obs.obs_frontend_get_last_screenshot(), shot_game or DESKTOP_FOLDER, "Screenshot")
+        shot_game = nil
+        play_sound()
     end
 end
 
@@ -235,9 +322,18 @@ end
 jit.off(quit_obs, true)
 
 local function check_commands()
-    if status_dirty then
+    -- the mic can also change from inside obs itself
+    if status_dirty or mic_state() ~= last_mic then
         status_dirty = false
         write_status()
+    end
+    run_moves()
+    -- a recording that never starts sends no event, and replays still need their own folder back
+    if clips_path ~= nil then
+        record_path_wait = record_path_wait + COMMAND_MS
+        if record_path_wait >= RECORD_PATH_WAIT_MS then
+            restore_clips_path()
+        end
     end
     -- the first close can get eaten by a popup, so i keep asking until obs is gone
     if quitting then
@@ -259,6 +355,17 @@ local function check_commands()
         obs.obs_frontend_replay_buffer_stop()
     elseif command == "save" then
         obs.obs_frontend_replay_buffer_save()
+    elseif command == "recordstart" then
+        start_recording()
+    elseif command == "recordstop" then
+        obs.obs_frontend_recording_stop()
+    elseif command == "screenshot" then
+        shot_game = game or foreground_game()
+        obs.obs_frontend_take_screenshot()
+    elseif command == "micon" then
+        set_mic(true)
+    elseif command == "micoff" then
+        set_mic(false)
     elseif command == "quit" then
         quitting = true
         quit_obs()
@@ -273,12 +380,14 @@ function script_defaults(settings)
     obs.obs_data_set_default_bool(settings, "capture_game", true)
     obs.obs_data_set_default_bool(settings, "sort_by_game", true)
     obs.obs_data_set_default_bool(settings, "save_sound", true)
+    obs.obs_data_set_default_string(settings, "recordings_dir", "")
 end
 
 function script_load(settings)
     capture_game = obs.obs_data_get_bool(settings, "capture_game")
     sort_by_game = obs.obs_data_get_bool(settings, "sort_by_game")
     save_sound = obs.obs_data_get_bool(settings, "save_sound")
+    recordings_dir = obs.obs_data_get_string(settings, "recordings_dir")
 
     sound_file = script_path() .. "saved.wav"
     command_file = script_path() .. "command.txt"
@@ -289,7 +398,7 @@ function script_load(settings)
 end
 
 function script_unload()
-    local text = "script=off\nreplay=off\ngame=\n"
+    local text = "script=off\nreplay=off\nrecording=off\nrecordstart=0\nmic=none\ngame=\n"
     obs.os_quick_write_utf8_file(status_file, text, #text, false)
 end
 

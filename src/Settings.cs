@@ -16,7 +16,12 @@ namespace ShadBuffer
         public int ClipSeconds { get; set; } = 120;
         public string SaveHotkey { get; set; } = "Alt+F10";
         public string OverlayHotkey { get; set; } = "Alt+X";
+        public string RecordHotkey { get; set; } = "Alt+F9";
+        public string ScreenshotHotkey { get; set; } = "Alt+F1";
+        public string ReplayHotkey { get; set; } = "Alt+Shift+F10";
+        public string MicHotkey { get; set; } = "Ctrl+Alt+M";
         public string ClipsDir { get; set; }
+        public string RecordingsDir { get; set; }
         public bool SaveSound { get; set; } = true;
         public bool SortByGame { get; set; } = true;
 
@@ -31,13 +36,14 @@ namespace ShadBuffer
         public string MicDevice { get; set; } = DeviceDefault;
         public string NoiseSuppression { get; set; } = NoiseOff;
         public string DesktopDevice { get; set; } = DeviceDefault;
-        public bool SeparateTracks { get; set; } = true;
+        public bool SeparateTracks { get; set; }
 
         public bool StartAtLogin { get; set; } = true;
         public bool RunAsAdmin { get; set; } = true;
         public bool GameBarOff { get; set; } = true;
 
         public bool ReplayEnabled { get; set; } = true;
+        public bool KappaNoticeSeen { get; set; }
 
         public static Settings Load(Context ctx)
         {
@@ -47,6 +53,10 @@ namespace ShadBuffer
             if (string.IsNullOrEmpty(settings.ClipsDir))
             {
                 settings.ClipsDir = ctx.ClipsDir;
+            }
+            if (string.IsNullOrEmpty(settings.RecordingsDir))
+            {
+                settings.RecordingsDir = ctx.RecordingsDir;
             }
             return settings;
         }
@@ -67,23 +77,34 @@ namespace ShadBuffer
             return new JavaScriptSerializer().Serialize(this);
         }
 
+        // these save the moment they change, so they never count as unapplied
+        public void CopyLiveValues(Settings from)
+        {
+            ReplayEnabled = from.ReplayEnabled;
+            RecordMic = from.RecordMic;
+            KappaNoticeSeen = from.KappaNoticeSeen;
+        }
+
         public bool SameAs(Settings other)
         {
             Settings a = Clone();
-            Settings b = other.Clone();
-            a.ReplayEnabled = b.ReplayEnabled = true;
-            return a.ToJson() == b.ToJson();
+            a.CopyLiveValues(other);
+            return a.ToJson() == other.ToJson();
         }
 
-        // anything obs only reads at launch, startup and overlay changes don't need a restart
+        // anything obs only reads at launch, the helper owns the other hotkeys so those don't need a restart
         public bool NeedsObsRestart(Settings other)
         {
             Settings a = Clone();
             Settings b = other.Clone();
-            a.ReplayEnabled = b.ReplayEnabled = true;
-            a.StartAtLogin = b.StartAtLogin = true;
-            a.GameBarOff = b.GameBarOff = true;
-            a.OverlayHotkey = b.OverlayHotkey = "";
+            a.CopyLiveValues(b);
+            a.StartAtLogin = b.StartAtLogin;
+            a.GameBarOff = b.GameBarOff;
+            a.OverlayHotkey = b.OverlayHotkey;
+            a.RecordHotkey = b.RecordHotkey;
+            a.ScreenshotHotkey = b.ScreenshotHotkey;
+            a.ReplayHotkey = b.ReplayHotkey;
+            a.MicHotkey = b.MicHotkey;
             return a.ToJson() != b.ToJson();
         }
     }
