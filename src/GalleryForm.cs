@@ -224,7 +224,7 @@ namespace ShadBuffer
                 player.ToggleMute();
                 e.Handled = true;
             }
-            else if (e.KeyCode == Keys.Space && openFile != null)
+            else if (e.KeyCode == Keys.Space && openFile != null && player != null)
             {
                 player.Toggle();
                 e.Handled = true;
